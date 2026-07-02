@@ -85,6 +85,8 @@ var saved = true;
 function $(id){return document.getElementById(id);}
 function toast(t){var e=$("toast");e.textContent=t;e.classList.add("show");setTimeout(function(){e.classList.remove("show");},1800);}
 function numOrNull(id){var v=$(id).value.trim();return v===""?null:Number(v);}
+// Leaflet 在重复世界地图上可能返回 -239 这类经度，需要归一化。
+function wrapLng(lng){return ((((Number(lng)+180)%360)+360)%360)-180;}
 
 function info(){
   var tag = saved ? "已保存 ✓" : "未保存 · 点“保存定位”生效";
@@ -93,9 +95,10 @@ function info(){
 }
 
 function dispPos(){return datum==="gcj"?GCJ.wgs2gcj(WGS.lat,WGS.lng):[WGS.lat,WGS.lng];}
-function toWgs(lat,lng){return datum==="gcj"?GCJ.gcj2wgs(lat,lng):[lat,lng];}
+function toWgs(lat,lng){lng=wrapLng(lng);return datum==="gcj"?GCJ.gcj2wgs(lat,lng):[lat,lng];}
 
 function fetchElevation(lat,lng){
+  lng=wrapLng(lng);
   return fetch("https://api.open-meteo.com/v1/elevation?latitude="+lat+"&longitude="+lng)
     .then(function(r){return r.json();})
     .then(function(d){return (d&&d.elevation&&d.elevation.length)?d.elevation[0]:null;})
@@ -103,8 +106,9 @@ function fetchElevation(lat,lng){
 }
 
 function movePin(dispLat,dispLng){
+  dispLng=wrapLng(dispLng);
   var w=toWgs(dispLat,dispLng);
-  WGS={lat:w[0], lng:w[1]};
+  WGS={lat:w[0], lng:wrapLng(w[1])};
   saved=false;
   marker.setLatLng([dispLat,dispLng]);
   info();

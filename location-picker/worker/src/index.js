@@ -86,6 +86,10 @@ function setInt(target, key, value) {
   }
 }
 
+function wrapLng(lng) {
+  return ((((Number(lng) + 180) % 360) + 360) % 360) - 180;
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
@@ -115,10 +119,11 @@ export default {
         }
         const j = JSON.parse(bodyText);
         const la = Number(j.lat);
-        const lo = Number(j.lng);
-        if (!Number.isFinite(la) || !Number.isFinite(lo) || la < -90 || la > 90 || lo < -180 || lo > 180) {
+        const loRaw = Number(j.lng);
+        if (!Number.isFinite(la) || !Number.isFinite(loRaw) || la < -90 || la > 90) {
           return jsonResponse({ error: "bad coords" }, 400);
         }
+        const lo = wrapLng(loRaw);
         const cur = await readLoc(env);
         cur.latitude = la;
         cur.longitude = lo;
