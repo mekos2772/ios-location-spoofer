@@ -15,6 +15,9 @@
 //
 // Shadowrocket 模块 argument 末尾加：
 //   &configUrl=https://你的域名:8443/loc.json?token=你的密码
+//
+// 注意：URL 必须带 ?token=<TOKEN>。缺 token → 服务端返回 401 + "missing token"；
+// token 错 → 返回 403 + "bad token"。网页端点同样适用。
 
 const http = require("http");
 const https = require("https");
@@ -58,23 +61,33 @@ function send(res, code, type, body) {
   res.end(body);
 }
 
+// 区分「没传 token」和「token 传错」：前者 401 引导补 ?token=，后者 403
+function checkToken(token, res) {
+  if (!TOKEN) return true; // 没设 TOKEN 环境变量 = 不校验（仅本地开发用）
+  if (token == null || token === "") {
+    send(res, 401, "application/json", '{"error":"missing token","hint":"add ?token=<TOKEN> to the URL (must match the TOKEN env var)"}');
+    return false;
+  }
+  if (token !== TOKEN) {
+    send(res, 403, "application/json", '{"error":"bad token"}');
+    return false;
+  }
+  return true;
+}
+
 function handler(req, res) {
   const url = new URL(req.url, "http://" + (req.headers.host || "localhost"));
   const token = url.searchParams.get("token");
 
   // ---- Shadowrocket 读取坐标（存的就是 WGS-84，Apple 需要的格式） ----
   if (url.pathname === "/loc.json" && req.method === "GET") {
-    if (TOKEN && token !== TOKEN) {
-      return send(res, 403, "application/json", '{"error":"bad token"}');
-    }
+    if (!checkToken(token, res)) return;
     return send(res, 200, "application/json", JSON.stringify(readLoc()));
   }
 
   // ---- 网页保存（前端已转好 WGS-84 再发过来；海拔/精度可选） ----
   if (url.pathname === "/set" && req.method === "POST") {
-    if (TOKEN && token !== TOKEN) {
-      return send(res, 403, "application/json", '{"error":"bad token"}');
-    }
+    if (!checkToken(token, res)) return;
     let body = "";
     req.on("data", function (c) {
       body += c;
@@ -115,9 +128,7 @@ function handler(req, res) {
 
   // ---- 一键切换：伪造 / 恢复真实定位 ----
   if (url.pathname === "/enable" && req.method === "POST") {
-    if (TOKEN && token !== TOKEN) {
-      return send(res, 403, "application/json", '{"error":"bad token"}');
-    }
+    if (!checkToken(token, res)) return;
     let body = "";
     req.on("data", function (c) {
       body += c;
