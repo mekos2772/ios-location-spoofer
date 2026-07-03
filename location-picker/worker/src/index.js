@@ -12,6 +12,7 @@ import { PAGE } from "./page.js";
 const KV_KEY = "loc";
 
 const DEFAULT = {
+  enabled: true,          // false = 脚本放行原始响应（恢复真实定位）
   latitude: 37.3349,
   longitude: -122.00902,
   altitude: 530,
@@ -125,6 +126,7 @@ export default {
         }
         const lo = wrapLng(loRaw);
         const cur = await readLoc(env);
+        cur.enabled = true; // 保存一个新位置 = 开启伪造
         cur.latitude = la;
         cur.longitude = lo;
         setInt(cur, "altitude", j.altitude);
@@ -133,6 +135,27 @@ export default {
         await writeLoc(env, cur);
         return jsonResponse(cur);
       } catch {
+        return jsonResponse({ error: "bad json" }, 400);
+      }
+    }
+
+    // ---- 一键切换：伪造 / 恢复真实定位 ----
+    if (url.pathname === "/enable" && request.method === "POST") {
+      if (!auth.ok) {
+        return unauthorized();
+      }
+      let bodyText;
+      try {
+        bodyText = await request.text();
+        if (bodyText.length > 10000) {
+          return jsonResponse({ error: "payload too large" }, 413);
+        }
+        const j = JSON.parse(bodyText);
+        const cur = await readLoc(env);
+        cur.enabled = j.enabled !== false; // false=恢复真实定位（脚本放行）
+        await writeLoc(env, cur);
+        return jsonResponse(cur);
+      } catch (error) {
         return jsonResponse({ error: "bad json" }, 400);
       }
     }
