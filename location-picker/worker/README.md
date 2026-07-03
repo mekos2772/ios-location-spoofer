@@ -6,7 +6,7 @@
 
 | 路径 | 方法 | 说明 |
 |------|------|------|
-| `/` | GET | 地图选点网页（URL 加 `?token=` 才能保存） |
+| `/?token=` | GET | 地图选点网页（必须带正确 token） |
 | `/loc.json?token=` | GET | 读取坐标 JSON |
 | `/set?token=` | POST | 保存坐标 |
 | `/health` | GET | 健康检查（无需 token） |

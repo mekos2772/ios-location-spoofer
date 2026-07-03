@@ -84,7 +84,13 @@ worker.js
 Deploy
 ```
 
-部署后访问 Worker 主页，如果能看到地图页面，说明代码部分已经成功。
+部署后访问带 TOKEN 的 Worker 主页，如果能看到地图页面，说明代码部分已经成功。例如：
+
+```text
+https://你的Worker地址/?token=你的TOKEN
+```
+
+不带 TOKEN 访问主页应该返回 403。
 
 ## 三、创建 KV
 
@@ -383,7 +389,19 @@ https://你的域名/loc.json?token=你的TOKEN
 
 ### 访问主页不带 token 也能看到地图，安全吗？
 
-默认是正常的。地图页面本身可以打开，但真正读写坐标的接口需要 TOKEN。
+新版单文件 Worker 已经收紧为：地图主页也必须带正确 TOKEN 才能打开。
+
+不带 TOKEN 访问：
+
+```text
+https://你的域名/
+```
+
+应该返回：
+
+```json
+{"error":"bad token"}
+```
 
 不带 TOKEN 访问：
 

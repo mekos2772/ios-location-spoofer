@@ -4,7 +4,7 @@
  * API（与 location-picker/server.js 兼容）：
  *   GET  /loc.json?token=   → 读取坐标 JSON（Loon / Shadowrocket configUrl）
  *   POST /set?token=        → 保存坐标
- *   GET  /?token=           → 地图选点网页
+ *   GET  /?token=           → 地图选点网页（必须带正确 token）
  */
 
 import { PAGE } from "./page.js";
@@ -138,7 +138,9 @@ export default {
     }
 
     if ((url.pathname === "/" || url.pathname === "") && request.method === "GET") {
-      // 地图页允许无 token 打开，但保存/读取 API 仍需 token
+      if (!auth.ok) {
+        return unauthorized();
+      }
       return textResponse(PAGE, "text/html; charset=utf-8");
     }
 
