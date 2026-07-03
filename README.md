@@ -98,6 +98,7 @@ location-picker/worker/          # Cloudflare Worker 版（免 VPS，支持 Loon
 | 方式 | 目录 | 适合 |
 |------|------|------|
 | **Cloudflare Worker**（推荐） | [`location-picker/worker/`](location-picker/worker/) | 免 VPS、自带 HTTPS，[部署说明](location-picker/worker/README.md) |
+| Cloudflare 网页后台 | [`location-picker/cloudflare-webui/`](location-picker/cloudflare-webui/) | 不想装 npm / Wrangler，直接复制单文件 `worker.js` |
 | Node 自托管 | [`location-picker/server.js`](location-picker/server.js) | 有自己的 VPS / NAS |
 
 Loon 插件 **远程配置 URL** 示例：

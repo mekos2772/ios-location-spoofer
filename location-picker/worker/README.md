@@ -13,6 +13,8 @@
 
 ## 部署
 
+> 只想用 Cloudflare 网页后台复制粘贴、不想装 npm / Wrangler 的用户，看这里：[`../cloudflare-webui/`](../cloudflare-webui/)。
+
 ### 1. 安装依赖
 
 ```bash
