@@ -1,0 +1,10 @@
+#!name=iOS Location Spoofer
+#!desc=拦截 Apple 定位服务器回应的 GPS 坐标，替换成自定义位置。适用于 Surge。
+#!homepage=https://github.com/mekos2772/ios-location-spoofer
+#!arguments=latitude:37.3349,longitude:-122.00902,altitude:530,horizontalAccuracy:39,verticalAccuracy:1000,debug:false
+
+[Script]
+iOS Location Spoofer = type=http-response,pattern=^https?:\/\/(?:gs-loc(?:-cn)?\.apple\.com|bluedot\.is\.autonavi\.com(?:\.gds\.alibabadns\.com)?)\/clls\/wloc(?:\?.*)?$,requires-body=1,binary-body-mode=1,max-size=1048576,timeout=10,script-path=https://raw.githubusercontent.com/mekos2772/ios-location-spoofer/main/location-spoofer.js,argument=mode=response&latitude={{{latitude}}}&longitude={{{longitude}}}&horizontalAccuracy={{{horizontalAccuracy}}}&verticalAccuracy={{{verticalAccuracy}}}&altitude={{{altitude}}}&debug={{{debug}}}
+
+[MITM]
+hostname = %APPEND% gs-loc.apple.com, gs-loc-cn.apple.com, bluedot.is.autonavi.com, bluedot.is.autonavi.com.gds.alibabadns.com

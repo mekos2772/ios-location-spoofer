@@ -1,5 +1,5 @@
 #!name=iOS Location Spoofer
-#!desc=拦截 Apple 定位服务器回应的 GPS 坐标，替换成自定义位置。适用于 Shadowrocket / Surge。
+#!desc=拦截 Apple 定位服务器回应的 GPS 坐标，替换成自定义位置。适用于 Shadowrocket。
 #!homepage=https://github.com/mekos2772/ios-location-spoofer
 
 [Script]
