@@ -21,14 +21,33 @@
 
 const http = require("http");
 const https = require("https");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
 const PORT = process.env.PORT || 8080;
-const TOKEN = process.env.TOKEN || "change-me-please"; // 部署时务必改成随机字符串
+// TOKEN 必设：不设直接退出，绝不用弱口令兜底（否则任何人都能读写你的定位）
+const TOKEN = process.env.TOKEN || "";
+if (!TOKEN) {
+  console.error(
+    "启动失败：未设置 TOKEN 环境变量。请用随机字符串启动，例如：\n" +
+    "  TOKEN=$(openssl rand -hex 24) PORT=8080 node server.js"
+  );
+  process.exit(1);
+}
 const CERT = process.env.CERT || "";                   // https 证书 fullchain 路径（留空=http）
 const KEY = process.env.KEY || "";                     // https 私钥路径
 const DATA_FILE = path.join(__dirname, "loc.json");
+
+// 常量时间比较，避免通过响应时延逐字节爆破 token
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ab.length !== bb.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(ab, bb);
+}
 
 // 字段名/默认值与 location-spoofer.js 的 DEFAULT_CONFIG 对齐
 const DEFAULT = {
@@ -63,12 +82,11 @@ function send(res, code, type, body) {
 
 // 区分「没传 token」和「token 传错」：前者 401 引导补 ?token=，后者 403
 function checkToken(token, res) {
-  if (!TOKEN) return true; // 没设 TOKEN 环境变量 = 不校验（仅本地开发用）
   if (token == null || token === "") {
     send(res, 401, "application/json", '{"error":"missing token","hint":"add ?token=<TOKEN> to the URL (must match the TOKEN env var)"}');
     return false;
   }
-  if (token !== TOKEN) {
+  if (!safeEqual(token, TOKEN)) {
     send(res, 403, "application/json", '{"error":"bad token"}');
     return false;
   }
@@ -148,8 +166,9 @@ function handler(req, res) {
     return;
   }
 
-  // ---- 地图网页 ----
+  // ---- 地图网页（与 Worker 版一致，必须带正确 token） ----
   if (url.pathname === "/" && req.method === "GET") {
+    if (!checkToken(token, res)) return;
     return send(res, 200, "text/html; charset=utf-8", PAGE);
   }
 

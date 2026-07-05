@@ -1,4 +1,7 @@
 // 与 location-picker/server.js 的 PAGE 保持一致（地图选点 UI）
+// ⚠️ 本文件由 worker/src/page.js + worker/src/index.js 合并生成，请勿手改；
+//    要改逻辑请改 worker/src/ 再重新合并，避免多份副本漂移。
+
 export const PAGE = `<!doctype html>
 <html lang="zh">
 <head>
@@ -22,6 +25,7 @@ export const PAGE = `<!doctype html>
   .opts label{font-size:13px;color:#444;display:flex;flex-direction:column}
   .opts input{width:88px;padding:8px;font-size:15px;border:1px solid #ccc;border-radius:6px;margin-top:2px}
   #savebtn{padding:11px 20px;font-size:16px;border:0;border-radius:8px;background:#34c759;color:#fff;font-weight:600}
+  #restorebtn{padding:11px 16px;font-size:15px;border:0;border-radius:8px;background:#8e8e93;color:#fff}
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
     background:rgba(0,0,0,.85);color:#fff;padding:10px 16px;border-radius:8px;
     font-size:14px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:9999}
@@ -41,12 +45,12 @@ export const PAGE = `<!doctype html>
   <label>水平精度<input id="hacc" type="number" inputmode="numeric"></label>
   <label>垂直精度<input id="vacc" type="number" inputmode="numeric"></label>
   <button id="savebtn">保存定位</button>
+  <button id="restorebtn">恢复真实定位</button>
 </div>
 <div class="toast" id="toast"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 var token = new URLSearchParams(location.search).get("token") || "";
-var authQuery = "?tok" + "en=";
 
 var GCJ = (function(){
   var PI = Math.PI, a = 6378245.0, ee = 0.00669342162296594323;
@@ -71,9 +75,11 @@ var GCJ = (function(){
     dLng=(dLng*180.0)/(a/sm*Math.cos(radLat)*PI);
     return [lat+dLat,lng+dLng];
   }
-  function gcj2wgs(lat,lng){
+  function gcj2wgs(lat,lng){ // 迭代反解，往返误差 <0.001 米
     if(outOfChina(lat,lng))return [lat,lng];
-    var g=wgs2gcj(lat,lng); return [lat*2-g[0], lng*2-g[1]];
+    var wlat=lat, wlng=lng;
+    for(var i=0;i<3;i++){ var g=wgs2gcj(wlat,wlng); wlat+=lat-g[0]; wlng+=lng-g[1]; }
+    return [wlat,wlng];
   }
   return {wgs2gcj:wgs2gcj, gcj2wgs:gcj2wgs};
 })();
@@ -82,6 +88,7 @@ var map, marker;
 var WGS = {lat:0, lng:0};
 var datum = "gcj";
 var saved = true;
+var enabledState = true;  // true=伪造中；false=已恢复真实定位（脚本放行）
 
 function $(id){return document.getElementById(id);}
 function toast(t){var e=$("toast");e.textContent=t;e.classList.add("show");setTimeout(function(){e.classList.remove("show");},1800);}
@@ -90,9 +97,33 @@ function numOrNull(id){var v=$(id).value.trim();return v===""?null:Number(v);}
 function wrapLng(lng){return ((((Number(lng)+180)%360)+360)%360)-180;}
 
 function info(){
+  if(!enabledState){
+    $("info").innerHTML = "<b style='color:#ff9500'>已恢复真实定位 · 脚本放行不修改</b>　（关开定位后生效）";
+    return;
+  }
   var tag = saved ? "已保存 ✓" : "未保存 · 点“保存定位”生效";
   $("info").innerHTML = "<b style='color:"+(saved?"#34c759":"#ff9500")+"'>"+tag+"</b>　WGS-84 "+
     WGS.lat.toFixed(5)+", "+WGS.lng.toFixed(5)+"　海拔 "+($("alt").value||"?")+"m";
+}
+
+// 切换按钮外观：伪造中(灰按钮“恢复真实定位”) / 已恢复(橙按钮“重新开启伪造”)
+function updateEnabledUI(){
+  var b=$("restorebtn");
+  if(enabledState){ b.textContent="恢复真实定位"; b.style.background="#8e8e93"; }
+  else { b.textContent="● 重新开启伪造"; b.style.background="#ff9500"; }
+  info();
+}
+
+// 一键切换 伪造/恢复真实
+function toggleEnabled(){
+  var want = !enabledState;
+  fetch("/enable?token="+encodeURIComponent(token),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:want})})
+    .then(function(r){
+      if(r.ok){ enabledState=want; updateEnabledUI();
+        toast(want ? "已开启伪造，记得关开定位生效" : "已恢复真实定位，记得关开定位生效"); }
+      else toast("切换失败 "+r.status);
+    })
+    .catch(function(){ toast("网络错误"); });
 }
 
 function dispPos(){return datum==="gcj"?GCJ.wgs2gcj(WGS.lat,WGS.lng):[WGS.lat,WGS.lng];}
@@ -119,8 +150,8 @@ function movePin(dispLat,dispLng){
 function commit(){
   var payload={lat:WGS.lat, lng:WGS.lng,
     altitude:numOrNull("alt"), horizontalAccuracy:numOrNull("hacc"), verticalAccuracy:numOrNull("vacc")};
-  fetch("/set"+authQuery+encodeURIComponent(token),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
-    .then(function(r){ if(r.ok){ saved=true; info(); toast("已保存 ✓ Loon/小火箭约60秒内生效"); } else { toast("保存失败 "+r.status); } })
+  fetch("/set?token="+encodeURIComponent(token),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+    .then(function(r){ if(r.ok){ saved=true; enabledState=true; updateEnabledUI(); toast("已保存 ✓ Loon/小火箭约60秒内生效"); } else { toast("保存失败 "+r.status); } })
     .catch(function(){ toast("网络错误"); });
 }
 
@@ -150,9 +181,10 @@ function search(){
 }
 
 function load(){
-  fetch("/loc.json"+authQuery+encodeURIComponent(token)).then(function(r){return r.json();}).then(function(d){
+  fetch("/loc.json?token="+encodeURIComponent(token)).then(function(r){return r.json();}).then(function(d){
     WGS={lat:d.latitude, lng:d.longitude};
     saved=true;
+    enabledState=(d.enabled!==false);
     $("alt").value=(d.altitude!==undefined?d.altitude:"");
     $("hacc").value=(d.horizontalAccuracy!==undefined?d.horizontalAccuracy:39);
     $("vacc").value=(d.verticalAccuracy!==undefined?d.verticalAccuracy:1000);
@@ -173,7 +205,7 @@ function load(){
     L.control.layers({"高德地图":amapVec,"高德卫星":amapSat,"国外 OSM":osm},null,{collapsed:false}).addTo(map);
 
     marker=L.marker(dispPos(),{draggable:true}).addTo(map);
-    info();
+    updateEnabledUI();
 
     map.on("baselayerchange",function(e){datum=e.layer.datum||"wgs"; var p=dispPos(); marker.setLatLng(p); map.setView(p,map.getZoom()); info();});
     map.on("click",function(e){movePin(e.latlng.lat,e.latlng.lng);});
@@ -184,6 +216,7 @@ function load(){
 $("btn").addEventListener("click",search);
 $("q").addEventListener("keydown",function(e){if(e.key==="Enter")search();});
 $("savebtn").addEventListener("click",commit);
+$("restorebtn").addEventListener("click",toggleEnabled);
 load();
 </script>
 </body>
@@ -202,6 +235,7 @@ load();
 const KV_KEY = "loc";
 
 const DEFAULT = {
+  enabled: true,          // false = 脚本放行原始响应（恢复真实定位）
   latitude: 37.3349,
   longitude: -122.00902,
   altitude: 530,
@@ -241,6 +275,21 @@ function unauthorized() {
   return jsonResponse({ error: "bad token" }, 403);
 }
 
+// 常量时间比较，避免通过响应时延逐字节爆破 token
+function safeEqual(a, b) {
+  const enc = new TextEncoder();
+  const ab = enc.encode(String(a));
+  const bb = enc.encode(String(b));
+  if (ab.length !== bb.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < ab.length; i += 1) {
+    diff |= ab[i] ^ bb[i];
+  }
+  return diff === 0;
+}
+
 function checkToken(request, env) {
   const configured = env.TOKEN;
   if (!configured) {
@@ -248,7 +297,7 @@ function checkToken(request, env) {
   }
   const url = new URL(request.url);
   const token = url.searchParams.get("token");
-  if (token !== configured) {
+  if (token == null || !safeEqual(token, configured)) {
     return { ok: false, error: "bad token" };
   }
   return { ok: true };
@@ -315,6 +364,7 @@ export default {
         }
         const lo = wrapLng(loRaw);
         const cur = await readLoc(env);
+        cur.enabled = true; // 保存一个新位置 = 开启伪造
         cur.latitude = la;
         cur.longitude = lo;
         setInt(cur, "altitude", j.altitude);
@@ -323,6 +373,27 @@ export default {
         await writeLoc(env, cur);
         return jsonResponse(cur);
       } catch {
+        return jsonResponse({ error: "bad json" }, 400);
+      }
+    }
+
+    // ---- 一键切换：伪造 / 恢复真实定位 ----
+    if (url.pathname === "/enable" && request.method === "POST") {
+      if (!auth.ok) {
+        return unauthorized();
+      }
+      let bodyText;
+      try {
+        bodyText = await request.text();
+        if (bodyText.length > 10000) {
+          return jsonResponse({ error: "payload too large" }, 413);
+        }
+        const j = JSON.parse(bodyText);
+        const cur = await readLoc(env);
+        cur.enabled = j.enabled !== false; // false=恢复真实定位（脚本放行）
+        await writeLoc(env, cur);
+        return jsonResponse(cur);
+      } catch (error) {
         return jsonResponse({ error: "bad json" }, 400);
       }
     }

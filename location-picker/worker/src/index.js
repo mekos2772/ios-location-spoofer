@@ -52,6 +52,21 @@ function unauthorized() {
   return jsonResponse({ error: "bad token" }, 403);
 }
 
+// 常量时间比较，避免通过响应时延逐字节爆破 token
+function safeEqual(a, b) {
+  const enc = new TextEncoder();
+  const ab = enc.encode(String(a));
+  const bb = enc.encode(String(b));
+  if (ab.length !== bb.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < ab.length; i += 1) {
+    diff |= ab[i] ^ bb[i];
+  }
+  return diff === 0;
+}
+
 function checkToken(request, env) {
   const configured = env.TOKEN;
   if (!configured) {
@@ -59,7 +74,7 @@ function checkToken(request, env) {
   }
   const url = new URL(request.url);
   const token = url.searchParams.get("token");
-  if (token !== configured) {
+  if (token == null || !safeEqual(token, configured)) {
     return { ok: false, error: "bad token" };
   }
   return { ok: true };
