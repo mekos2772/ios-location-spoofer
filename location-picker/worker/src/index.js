@@ -24,7 +24,24 @@ const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
+  // 选点页 URL 带 ?token=，务必阻止它经 Referer 泄漏给 unpkg / 高德 / OSM / open-meteo / nominatim
+  "Referrer-Policy": "no-referrer",
+  "X-Content-Type-Options": "nosniff",
 };
+
+// 选点页专属 CSP：页面 URL 带 token，锁死脚本来源与可连接域名做纵深防御，
+// 万一 CDN 被投毒也无法把 token 外传。script/style 需 'unsafe-inline'（页面自身内联），
+// 外部脚本只放行 unpkg（已配 SRI）；connect 只放行地图/地理编码接口。
+const PAGE_CSP = [
+  "default-src 'none'",
+  "script-src https://unpkg.com 'unsafe-inline'",
+  "style-src https://unpkg.com 'unsafe-inline'",
+  "img-src 'self' https: data:", // 地图瓦片（高德 wprd0*/webst0*、OSM 多子域）
+  "connect-src 'self' https://api.open-meteo.com https://nominatim.openstreetmap.org",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join("; ");
 
 function jsonResponse(body, status = 200) {
   return new Response(typeof body === "string" ? body : JSON.stringify(body), {
@@ -179,11 +196,23 @@ export default {
       if (!auth.ok) {
         return unauthorized();
       }
-      return textResponse(PAGE, "text/html; charset=utf-8");
+      return new Response(PAGE, {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Content-Security-Policy": PAGE_CSP,
+          ...CORS,
+        },
+      });
     }
 
     if (url.pathname === "/health") {
       return jsonResponse({ ok: true, kv: !!env.LOC_KV, tokenConfigured: !!env.TOKEN });
+    }
+
+    // 浏览器会自动请求 favicon；这里静默返 204，避免落到 404 分支产生噪音日志
+    if (url.pathname === "/favicon.ico") {
+      return new Response(null, { status: 204, headers: CORS });
     }
 
     return textResponse("not found", "text/plain", 404);

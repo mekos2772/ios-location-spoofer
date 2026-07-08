@@ -10,7 +10,7 @@ enabled = switch,true,tag=启用定位修改,desc=关闭后脚本直接放行原
 latitude = input,"37.3349",tag=纬度(备用),desc=未配置远程时生效
 longitude = input,"-122.00902",tag=经度(备用),desc=未配置远程时生效
 altitude = input,"530",tag=海拔(米),desc=目标海拔
-address = input,"",tag=地址搜索,desc=填地名；cron 每5分钟联网解析
+address = input,"",tag=地址搜索,desc=填地名；cron 每15分钟联网解析
 configHost = input,"https://loc.ikun.day",tag=配置服务器,desc=不要末尾斜杠
 configToken = input,"",tag=配置Token,desc=必填才能读 loc.json（与 configUrl 二选一）
 configUrl = input,"",tag=远程配置URL,desc=完整 loc.json 地址；与上两项二选一
@@ -19,7 +19,7 @@ debug = switch,true,tag=调试日志,desc=建议开启，Loon 日志搜 Location
 [Script]
 http-request ^https?:\/\/(?:gs-loc(?:-cn)?\.apple\.com|bluedot\.is\.autonavi\.com(?:\.gds\.alibabadns\.com)?)\/clls\/wloc(?:\?.*)?$ script-path=https://raw.githubusercontent.com/kun775/ios-location-spoofer/main/location-spoofer.js, requires-body=false, timeout=3, tag=iOS Location Spoofer Prepare, argument=[{debug}]
 http-response ^https?:\/\/(?:gs-loc(?:-cn)?\.apple\.com|bluedot\.is\.autonavi\.com(?:\.gds\.alibabadns\.com)?)\/clls\/wloc(?:\?.*)?$ script-path=https://raw.githubusercontent.com/kun775/ios-location-spoofer/main/location-spoofer.js, requires-body=true, binary-body-mode=true, max-size=1048576, timeout=12, tag=iOS Location Spoofer, argument=[{enabled},{latitude},{longitude},{altitude},{address},{configHost},{configToken},{configUrl},{debug}]
-cron "*/5 * * * *" script-path=https://raw.githubusercontent.com/kun775/ios-location-spoofer/main/location-spoofer.js, timeout=30, tag=iOS Location Spoofer Sync, argument=[{address},{configHost},{configToken},{configUrl},{debug}]
+cron "*/15 * * * *" script-path=https://raw.githubusercontent.com/kun775/ios-location-spoofer/main/location-spoofer.js, timeout=30, tag=iOS Location Spoofer Sync, argument=[{address},{configHost},{configToken},{configUrl},{debug}]
 
 [mitm]
 hostname = gs-loc.apple.com, gs-loc-cn.apple.com, bluedot.is.autonavi.com, bluedot.is.autonavi.com.gds.alibabadns.com
