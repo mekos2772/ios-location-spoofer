@@ -1,6 +1,6 @@
-#!name=iOS Location Spoofer
-#!desc=劫持 Apple 定位封包，把坐标换成你想要的。Stash 覆写版。
-#!homepage=https://github.com/mekos2772/ios-location-spoofer
+name: iOS Location Spoofer
+desc: 劫持 Apple 定位封包，把坐标换成你想要的。Stash 覆写版。
+homepage: https://github.com/mekos2772/ios-location-spoofer
 #
 # 两种 script-providers 用法，按需选择其一启用。不要两个同时启用。
 #
