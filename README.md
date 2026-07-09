@@ -103,14 +103,16 @@ location-picker/worker/          # Cloudflare Worker 版（免 VPS，支持 Loon
 Loon 插件 **远程配置 URL** 示例：
 
 ```
-https://你的worker.workers.dev/loc.json?token=你的TOKEN
+https://你的worker.workers.dev/pub.json
 ```
 
 ## 友情链接
 
 本项目接受 LINUX DO 社区佬友监督与反馈：[LINUX DO](https://linux.do)
 
-## location-picker 服务端配置
+## location-picker Node 自托管配置
+
+以下只适用于 `location-picker/server.js` Node 自托管版。Cloudflare Worker 版请看 [`location-picker/worker/`](location-picker/worker/)；Worker 版的客户端 `configUrl` 使用公开的 `/pub.json`，浏览器管理页通过登录弹窗和 `HttpOnly` Cookie 鉴权。
 
 `location-picker/server.js` 通过环境变量控制，**`TOKEN` 不设进程会直接退出，不会用弱口令兜底**。
 

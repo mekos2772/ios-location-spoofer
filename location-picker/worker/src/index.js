@@ -1,15 +1,21 @@
 /**
  * iOS Location Picker — Cloudflare Worker
  *
- * API（与 location-picker/server.js 兼容）：
- *   GET  /loc.json?token=   → 读取坐标 JSON（Loon / Shadowrocket configUrl）
- *   POST /set?token=        → 保存坐标
- *   GET  /?token=           → 地图选点网页
+ * API：
+ *   GET  /pub.json          → 公开读取坐标 JSON（Loon / Shadowrocket configUrl）
+ *   POST /login             → 用 TOKEN 登录，设置 HttpOnly 会话 Cookie
+ *   POST /logout            → 清除会话 Cookie
+ *   GET  /loc.json          → 管理端读取坐标 JSON（需会话 Cookie）
+ *   POST /set               → 保存坐标（需会话 Cookie）
+ *   POST /enable            → 切换伪造/真实定位（需会话 Cookie）
+ *   GET  /                  → 地图选点网页，进入后输入 TOKEN
  */
 
 import { PAGE } from "./page.js";
 
 const KV_KEY = "loc";
+const SESSION_COOKIE = "__Host-location_picker_session";
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 const DEFAULT = {
   enabled: true,          // false = 脚本放行原始响应（恢复真实定位）
@@ -26,13 +32,33 @@ const CORS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-function jsonResponse(body, status = 200) {
+function jsonResponse(body, status = 200, extraHeaders = {}) {
   return new Response(typeof body === "string" ? body : JSON.stringify(body), {
     status,
     headers: {
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
       ...CORS,
+      ...extraHeaders,
+    },
+  });
+}
+
+function shouldRedirectToHttps(url) {
+  return url.protocol === "http:" &&
+    url.hostname !== "localhost" &&
+    url.hostname !== "127.0.0.1" &&
+    url.hostname !== "[::1]";
+}
+
+function redirectToHttps(url) {
+  const target = new URL(url.toString());
+  target.protocol = "https:";
+  return new Response(null, {
+    status: 308,
+    headers: {
+      "Location": target.toString(),
+      "Cache-Control": "no-store",
     },
   });
 }
@@ -49,20 +75,140 @@ function textResponse(body, contentType, status = 200) {
 }
 
 function unauthorized() {
+  return jsonResponse({ error: "unauthorized" }, 403);
+}
+
+function badToken() {
   return jsonResponse({ error: "bad token" }, 403);
 }
 
-function checkToken(request, env) {
-  const configured = env.TOKEN;
-  if (!configured) {
-    return { ok: false, error: "server misconfigured: TOKEN secret not set" };
+function sessionSecret(env) {
+  return env.SESSION_SECRET || env.TOKEN || "";
+}
+
+function nowSeconds() {
+  return Math.floor(Date.now() / 1000);
+}
+
+function base64UrlEncode(bytes) {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
   }
-  const url = new URL(request.url);
-  const token = url.searchParams.get("token");
-  if (token !== configured) {
-    return { ok: false, error: "bad token" };
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlDecodeToString(value) {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
   }
-  return { ok: true };
+  return new TextDecoder().decode(bytes);
+}
+
+function timingSafeEqual(a, b) {
+  if (a.length !== b.length) {
+    return false;
+  }
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
+async function signValue(secret, value) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
+  return base64UrlEncode(new Uint8Array(signature));
+}
+
+async function createSessionValue(env) {
+  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify({
+    exp: nowSeconds() + SESSION_TTL_SECONDS,
+    v: 1,
+  })));
+  const signature = await signValue(sessionSecret(env), payload);
+  return `${payload}.${signature}`;
+}
+
+function parseCookies(request) {
+  const result = {};
+  const header = request.headers.get("Cookie") || "";
+  const pairs = header.split(";");
+  for (let i = 0; i < pairs.length; i += 1) {
+    const part = pairs[i].trim();
+    if (!part) {
+      continue;
+    }
+    const eq = part.indexOf("=");
+    if (eq < 0) {
+      continue;
+    }
+    result[part.slice(0, eq)] = part.slice(eq + 1);
+  }
+  return result;
+}
+
+async function hasValidSession(request, env) {
+  try {
+    const secret = sessionSecret(env);
+    if (!secret) {
+      return false;
+    }
+    const value = parseCookies(request)[SESSION_COOKIE] || "";
+    const parts = value.split(".");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      return false;
+    }
+    const expected = await signValue(secret, parts[0]);
+    if (!timingSafeEqual(parts[1], expected)) {
+      return false;
+    }
+    const payload = JSON.parse(base64UrlDecodeToString(parts[0]));
+    return Number(payload.exp) > nowSeconds();
+  } catch {
+    return false;
+  }
+}
+
+function setSessionCookie(value) {
+  return `${SESSION_COOKIE}=${value}; Max-Age=${SESSION_TTL_SECONDS}; Path=/; HttpOnly; Secure; SameSite=Strict`;
+}
+
+function clearSessionCookie() {
+  return `${SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict`;
+}
+
+async function login(request, env) {
+  if (!env.TOKEN) {
+    return jsonResponse({ error: "server misconfigured: TOKEN secret not set" }, 500);
+  }
+  try {
+    const bodyText = await request.text();
+    if (bodyText.length > 10000) {
+      return jsonResponse({ error: "payload too large" }, 413);
+    }
+    const body = JSON.parse(bodyText);
+    const token = String(body.token || "").trim();
+    if (token !== env.TOKEN) {
+      return badToken();
+    }
+    const sessionValue = await createSessionValue(env);
+    return jsonResponse({ ok: true, expiresIn: SESSION_TTL_SECONDS }, 200, {
+      "Set-Cookie": setSessionCookie(sessionValue),
+    });
+  } catch {
+    return jsonResponse({ error: "bad json" }, 400);
+  }
 }
 
 async function readLoc(env) {
@@ -93,15 +239,32 @@ function wrapLng(lng) {
 
 export default {
   async fetch(request, env) {
+    const url = new URL(request.url);
+    if (shouldRedirectToHttps(url)) {
+      return redirectToHttps(url);
+    }
+
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS });
     }
 
-    const url = new URL(request.url);
-    const auth = checkToken(request, env);
+    if (url.pathname === "/pub.json" && request.method === "GET") {
+      const loc = await readLoc(env);
+      return jsonResponse(loc);
+    }
+
+    if (url.pathname === "/login" && request.method === "POST") {
+      return login(request, env);
+    }
+
+    if (url.pathname === "/logout" && request.method === "POST") {
+      return jsonResponse({ ok: true }, 200, {
+        "Set-Cookie": clearSessionCookie(),
+      });
+    }
 
     if (url.pathname === "/loc.json" && request.method === "GET") {
-      if (!auth.ok) {
+      if (!(await hasValidSession(request, env))) {
         return unauthorized();
       }
       const loc = await readLoc(env);
@@ -109,7 +272,7 @@ export default {
     }
 
     if (url.pathname === "/set" && request.method === "POST") {
-      if (!auth.ok) {
+      if (!(await hasValidSession(request, env))) {
         return unauthorized();
       }
       let bodyText;
@@ -141,7 +304,7 @@ export default {
 
     // ---- 一键切换：伪造 / 恢复真实定位 ----
     if (url.pathname === "/enable" && request.method === "POST") {
-      if (!auth.ok) {
+      if (!(await hasValidSession(request, env))) {
         return unauthorized();
       }
       let bodyText;
@@ -161,12 +324,12 @@ export default {
     }
 
     if ((url.pathname === "/" || url.pathname === "") && request.method === "GET") {
-      // 地图页允许无 token 打开，但保存/读取 API 仍需 token
+      // 地图页允许无 token URL 打开；页面内弹窗输入 token 后调用管理 API
       return textResponse(PAGE, "text/html; charset=utf-8");
     }
 
     if (url.pathname === "/health") {
-      return jsonResponse({ ok: true, kv: !!env.LOC_KV, tokenConfigured: !!env.TOKEN });
+      return jsonResponse({ ok: true, kv: !!env.LOC_KV, tokenConfigured: !!env.TOKEN, sessionSecretConfigured: !!env.SESSION_SECRET });
     }
 
     return textResponse("not found", "text/plain", 404);

@@ -22,7 +22,32 @@ export const PAGE = `<!doctype html>
   .opts label{font-size:13px;color:#444;display:flex;flex-direction:column}
   .opts input{width:88px;padding:8px;font-size:15px;border:1px solid #ccc;border-radius:6px;margin-top:2px}
   #savebtn{padding:11px 20px;font-size:16px;border:0;border-radius:8px;background:#34c759;color:#fff;font-weight:600}
-  #restorebtn{padding:11px 16px;font-size:15px;border:0;border-radius:8px;background:#8e8e93;color:#fff}
+  #restorebtn,#loginbtn{padding:11px 16px;font-size:15px;border:0;border-radius:8px;background:#8e8e93;color:#fff}
+  #loginbtn{background:#007aff}
+  .login-modal{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;
+    padding:20px;box-sizing:border-box;background:rgba(15,23,42,.46);backdrop-filter:blur(10px)}
+  .login-modal[hidden]{display:none}
+  .login-card{width:min(380px,100%);box-sizing:border-box;background:rgba(255,255,255,.98);
+    border-radius:18px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.28)}
+  .login-card h2{margin:0 0 6px;font-size:21px;line-height:1.25;color:#111}
+  .login-card p{margin:0 0 16px;font-size:14px;line-height:1.45;color:#555}
+  .login-card label{display:block;margin:0 0 6px;font-size:13px;color:#444}
+  .login-card input{width:100%;box-sizing:border-box;padding:12px 13px;font-size:16px;
+    border:1px solid #cfd3dc;border-radius:10px;outline:none}
+  .login-card input:focus{border-color:#007aff;box-shadow:0 0 0 3px rgba(0,122,255,.16)}
+  .login-error{min-height:20px;margin:8px 0 12px;font-size:13px;color:#ff3b30}
+  .login-actions{display:flex;gap:8px;justify-content:flex-end}
+  .login-actions button{padding:10px 16px;font-size:15px;border:0;border-radius:10px}
+  #tokenCancel{background:#e5e5ea;color:#1d1d1f}
+  #tokenSubmit{background:#007aff;color:#fff;font-weight:600}
+  #tokenSubmit:disabled,#tokenCancel:disabled{opacity:.55}
+  @media (prefers-color-scheme:dark){
+    .login-card{background:rgba(28,28,30,.98)}
+    .login-card h2{color:#f5f5f7}
+    .login-card p,.login-card label{color:#c7c7cc}
+    .login-card input{background:#111;color:#fff;border-color:#3a3a3c}
+    #tokenCancel{background:#3a3a3c;color:#fff}
+  }
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
     background:rgba(0,0,0,.85);color:#fff;padding:10px 16px;border-radius:8px;
     font-size:14px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:9999}
@@ -43,11 +68,28 @@ export const PAGE = `<!doctype html>
   <label>垂直精度<input id="vacc" type="number" inputmode="numeric"></label>
   <button id="savebtn">保存定位</button>
   <button id="restorebtn">恢复真实定位</button>
+  <button id="loginbtn">重新登录</button>
 </div>
 <div class="toast" id="toast"></div>
+<div class="login-modal" id="loginModal" hidden role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+  <form class="login-card" id="loginForm">
+    <h2 id="loginTitle">登录管理页</h2>
+    <p id="loginMessage">输入访问 Token 后，登录状态会保存在 HttpOnly Cookie 中。</p>
+    <label for="tokenInput">访问 Token</label>
+    <input id="tokenInput" type="password" autocomplete="current-password" placeholder="请输入 Token">
+    <div class="login-error" id="loginError" aria-live="polite"></div>
+    <div class="login-actions">
+      <button type="button" id="tokenCancel">取消</button>
+      <button type="submit" id="tokenSubmit">登录</button>
+    </div>
+  </form>
+</div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-var token = new URLSearchParams(location.search).get("token") || "";
+var urlParams = new URLSearchParams(location.search);
+if(urlParams.has("token")){
+  history.replaceState(null,"",location.pathname+location.hash);
+}
 
 var GCJ = (function(){
   var PI = Math.PI, a = 6378245.0, ee = 0.00669342162296594323;
@@ -86,10 +128,108 @@ var WGS = {lat:0, lng:0};
 var datum = "gcj";
 var saved = true;
 var enabledState = true;  // true=伪造中；false=已恢复真实定位（脚本放行）
+var loginDialogPromise = null;
+var loginDialogResolve = null;
+var loginBusy = false;
 
 function $(id){return document.getElementById(id);}
 function toast(t){var e=$("toast");e.textContent=t;e.classList.add("show");setTimeout(function(){e.classList.remove("show");},1800);}
 function numOrNull(id){var v=$(id).value.trim();return v===""?null:Number(v);}
+function setLoginBusy(busy){
+  loginBusy = busy;
+  $("tokenSubmit").disabled = busy;
+  $("tokenCancel").disabled = busy;
+  $("tokenSubmit").textContent = busy ? "登录中…" : "登录";
+}
+function closeLoginDialog(result){
+  var resolve = loginDialogResolve;
+  loginDialogPromise = null;
+  loginDialogResolve = null;
+  $("loginModal").hidden = true;
+  $("tokenInput").value = "";
+  $("loginError").textContent = "";
+  setLoginBusy(false);
+  if(resolve){resolve(result);}
+}
+function loginWithDialog(message){
+  if(loginDialogPromise){
+    $("loginMessage").textContent = message || "输入访问 Token 后，登录状态会保存在 HttpOnly Cookie 中。";
+    $("loginError").textContent = "";
+    $("tokenInput").focus();
+    return loginDialogPromise;
+  }
+  $("loginMessage").textContent = message || "输入访问 Token 后，登录状态会保存在 HttpOnly Cookie 中。";
+  $("loginError").textContent = "";
+  $("tokenInput").value = "";
+  $("loginModal").hidden = false;
+  setLoginBusy(false);
+  setTimeout(function(){$("tokenInput").focus();},0);
+  loginDialogPromise = new Promise(function(resolve){loginDialogResolve = resolve;});
+  return loginDialogPromise;
+}
+function cookieTroubleshootingMessage(){
+  return "登录成功，但浏览器没有保存 Cookie。请确认使用 HTTPS 地址打开本页，并允许 Cookie；不要使用会拦截 Cookie 的内置浏览器或隐私模式。";
+}
+function verifySessionCookie(){
+  return fetchAdmin("/loc.json").then(function(r){
+    return r.ok;
+  }).catch(function(){
+    return false;
+  });
+}
+function submitLogin(){
+  if(loginBusy){return;}
+  var value = $("tokenInput").value.trim();
+  if(!value){
+    $("loginError").textContent = "请输入访问 Token";
+    $("tokenInput").focus();
+    return;
+  }
+  setLoginBusy(true);
+  return fetch("/login",{
+    method:"POST",
+    credentials:"same-origin",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({token:value})
+  }).then(function(r){
+    if(r.ok){
+      return verifySessionCookie().then(function(ok){
+        if(ok){
+          toast("登录成功");
+          closeLoginDialog(true);
+          return;
+        }
+        $("loginError").textContent = cookieTroubleshootingMessage();
+        $("tokenInput").select();
+      });
+    }
+    $("loginError").textContent = r.status===403 ? "Token 不正确，请重新输入" : "登录失败，HTTP "+r.status;
+    $("tokenInput").select();
+  }).catch(function(){
+    $("loginError").textContent = "网络错误，请稍后重试";
+  }).then(function(){
+    if(loginDialogResolve){setLoginBusy(false);}
+  });
+}
+function logout(){
+  return fetch("/logout",{method:"POST",credentials:"same-origin"}).catch(function(){});
+}
+function handleUnauthorized(action){
+  loginWithDialog("会话已过期，请重新登录。Token 不会保存在页面脚本里。").then(function(ok){
+    if(ok){action();}
+    else {$("info").textContent = "需要登录才能管理定位";}
+  });
+}
+function fetchAdmin(url, options){
+  options = options || {};
+  options.credentials = "same-origin";
+  return fetch(url, options);
+}
+function requireLoaded(){
+  if(map){return true;}
+  handleUnauthorized(load);
+  return false;
+}
 // Leaflet 在重复世界地图上可能返回 -239 这类经度，需要归一化。
 function wrapLng(lng){return ((((Number(lng)+180)%360)+360)%360)-180;}
 
@@ -113,11 +253,13 @@ function updateEnabledUI(){
 
 // 一键切换 伪造/恢复真实
 function toggleEnabled(){
+  if(!requireLoaded()){return;}
   var want = !enabledState;
-  fetch("/enable?token="+encodeURIComponent(token),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:want})})
+  fetchAdmin("/enable",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:want})})
     .then(function(r){
       if(r.ok){ enabledState=want; updateEnabledUI();
         toast(want ? "已开启伪造，记得关开定位生效" : "已恢复真实定位，记得关开定位生效"); }
+      else if(r.status===403) handleUnauthorized(toggleEnabled);
       else toast("切换失败 "+r.status);
     })
     .catch(function(){ toast("网络错误"); });
@@ -145,14 +287,20 @@ function movePin(dispLat,dispLng){
 }
 
 function commit(){
+  if(!requireLoaded()){return;}
   var payload={lat:WGS.lat, lng:WGS.lng,
     altitude:numOrNull("alt"), horizontalAccuracy:numOrNull("hacc"), verticalAccuracy:numOrNull("vacc")};
-  fetch("/set?token="+encodeURIComponent(token),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
-    .then(function(r){ if(r.ok){ saved=true; enabledState=true; updateEnabledUI(); toast("已保存 ✓ Loon/小火箭约60秒内生效"); } else { toast("保存失败 "+r.status); } })
+  fetchAdmin("/set",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+    .then(function(r){
+      if(r.ok){ saved=true; enabledState=true; updateEnabledUI(); toast("已保存 ✓ Loon/小火箭约60秒内生效"); }
+      else if(r.status===403) handleUnauthorized(commit);
+      else { toast("保存失败 "+r.status); }
+    })
     .catch(function(){ toast("网络错误"); });
 }
 
 function search(){
+  if(!requireLoaded()){return;}
   var q=$("q").value.trim(); if(!q) return;
   fetch("https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=8&q="+encodeURIComponent(q))
     .then(function(r){return r.json();})
@@ -178,7 +326,15 @@ function search(){
 }
 
 function load(){
-  fetch("/loc.json?token="+encodeURIComponent(token)).then(function(r){return r.json();}).then(function(d){
+  fetchAdmin("/loc.json").then(function(r){
+    if(r.status===403){
+      handleUnauthorized(load);
+      return null;
+    }
+    if(!r.ok){throw new Error("load failed "+r.status);}
+    return r.json();
+  }).then(function(d){
+    if(!d){return;}
     WGS={lat:d.latitude, lng:d.longitude};
     saved=true;
     enabledState=(d.enabled!==false);
@@ -207,13 +363,27 @@ function load(){
     map.on("baselayerchange",function(e){datum=e.layer.datum||"wgs"; var p=dispPos(); marker.setLatLng(p); map.setView(p,map.getZoom()); info();});
     map.on("click",function(e){movePin(e.latlng.lat,e.latlng.lng);});
     marker.on("dragend",function(){var p=marker.getLatLng(); movePin(p.lat,p.lng);});
-  }).catch(function(){$("info").textContent="加载失败，检查 token 是否正确";});
+  }).catch(function(){$("info").textContent="加载失败，检查登录状态或网络";});
 }
 
 $("btn").addEventListener("click",search);
 $("q").addEventListener("keydown",function(e){if(e.key==="Enter")search();});
 $("savebtn").addEventListener("click",commit);
 $("restorebtn").addEventListener("click",toggleEnabled);
+$("loginForm").addEventListener("submit",function(e){e.preventDefault();submitLogin();});
+$("tokenCancel").addEventListener("click",function(){if(!loginBusy){closeLoginDialog(false);}});
+$("loginModal").addEventListener("click",function(e){if(e.target===$("loginModal")&&!loginBusy){closeLoginDialog(false);}});
+document.addEventListener("keydown",function(e){
+  if(e.key==="Escape"&&!$("loginModal").hidden&&!loginBusy){closeLoginDialog(false);}
+});
+$("loginbtn").addEventListener("click",function(){
+  logout().then(function(){
+    return loginWithDialog("请输入访问 Token。登录状态会保存在 7 天有效的 HttpOnly Cookie 中。");
+  }).then(function(ok){
+    if(ok){location.reload();}
+    else {$("info").textContent="需要登录才能管理定位";}
+  });
+});
 load();
 </script>
 </body>

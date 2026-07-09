@@ -4,13 +4,12 @@
   "main": "src/index.js",
   "compatibility_date": "2026-01-01",
   "workers_dev": true,
-  // 首次部署前执行: npx wrangler kv namespace create LOC_KV
-  // 把输出的 id 填到下方（preview_id 用于 wrangler dev）
+  // Copy this file to wrangler.local.jsonc for personal deployment settings.
+  // Do not commit wrangler.local.jsonc.
   "kv_namespaces": [
     {
       "binding": "LOC_KV",
-      "id": "d386fe4ad15b4ac6b55ca224b69c9eff",
-      "preview_id": "f50f441fe0ba424a962998c43c408faf"
+      "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
     }
   ]
 }
