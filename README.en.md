@@ -4,7 +4,7 @@
 
 Use the HTTPS-decryption (MITM) feature of a proxy app to trick Apple's location service — and therefore Apple Maps — into placing your iPhone anywhere in the world.
 
-> 📖 **New here?** The step-by-step walkthrough is Chinese-only for now → [使用教程.md](使用教程.md) (install, configure, verify, and troubleshooting).
+> 📖 **New here?** The step-by-step walkthrough is here → [Tutorial](使用教程.en.md) (install, configure, verify, and troubleshooting). 中文版：[使用教程.md](使用教程.md)
 
 ## Credits
 
