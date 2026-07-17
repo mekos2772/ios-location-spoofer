@@ -11,6 +11,7 @@ export const PAGE = `<!doctype html>
   .bar{padding:8px;display:flex;gap:6px;box-sizing:border-box}
   .bar input{flex:1;padding:10px;font-size:16px;border:1px solid #ccc;border-radius:8px}
   .bar button{padding:10px 14px;font-size:16px;border:0;border-radius:8px;background:#007aff;color:#fff}
+  .bar button:disabled{opacity:.55}
   .results{margin:0 8px;border:1px solid #e2e2e2;border-radius:8px;max-height:34vh;overflow:auto;display:none}
   .results.show{display:block}
   .rrow{padding:10px 12px;font-size:14px;border-bottom:1px solid #eee;color:#222}
@@ -32,6 +33,7 @@ export const PAGE = `<!doctype html>
 <body>
 <div class="bar">
   <input id="q" placeholder="搜地名，回车列出候选（只预览，不改定位）">
+  <button id="locatebtn" disabled>当前位置</button>
   <button id="btn">搜</button>
 </div>
 <div class="results" id="results"></div>
@@ -93,6 +95,19 @@ function numOrNull(id){var v=$(id).value.trim();return v===""?null:Number(v);}
 // Leaflet 在重复世界地图上可能返回 -239 这类经度，需要归一化。
 function wrapLng(lng){return ((((Number(lng)+180)%360)+360)%360)-180;}
 
+function setLocateBusy(busy){
+  var b=$("locatebtn");
+  b.disabled=!!busy;
+  b.textContent=busy?"定位中…":"当前位置";
+}
+
+function geolocationErrorMessage(err){
+  if(err&&err.code===1)return "定位权限被拒绝，请在 Safari 设置中允许定位";
+  if(err&&err.code===2)return "暂时无法获取当前位置";
+  if(err&&err.code===3)return "获取当前位置超时，请到开阔处重试";
+  return "获取当前位置失败";
+}
+
 function info(){
   if(!enabledState){
     $("info").innerHTML = "<b style='color:#ff9500'>已恢复真实定位 · 脚本放行不修改</b>　（关开定位后生效）";
@@ -152,6 +167,48 @@ function commit(){
     .catch(function(){ toast("网络错误"); });
 }
 
+function locateCurrent(){
+  if(enabledState){
+    toast("请先恢复真实定位并刷新定位服务");
+    return;
+  }
+  if(!navigator.geolocation){
+    toast("当前浏览器不支持定位");
+    return;
+  }
+
+  setLocateBusy(true);
+  navigator.geolocation.getCurrentPosition(
+    function(pos){
+      var lat=Number(pos&&pos.coords&&pos.coords.latitude);
+      var lng=wrapLng(pos&&pos.coords&&pos.coords.longitude);
+      if(!Number.isFinite(lat)||!Number.isFinite(lng)){
+        toast("获取当前位置失败");
+        setLocateBusy(false);
+        return;
+      }
+
+      WGS={lat:lat,lng:lng};
+      saved=false;
+      var p=dispPos();
+      marker.setLatLng(p);
+      map.setView(p,16);
+      info();
+      fetchElevation(WGS.lat,WGS.lng).then(function(el){
+        if(el!==null)$("alt").value=Math.round(el);
+        info();
+      });
+      toast("已定位到当前位置，请确认后保存");
+      setLocateBusy(false);
+    },
+    function(err){
+      toast(geolocationErrorMessage(err));
+      setLocateBusy(false);
+    },
+    {enableHighAccuracy:true,maximumAge:0,timeout:12000}
+  );
+}
+
 function search(){
   var q=$("q").value.trim(); if(!q) return;
   fetch("https://nominatim.openstreetmap.org/search?format=json&addressdetails=0&limit=8&q="+encodeURIComponent(q))
@@ -203,6 +260,7 @@ function load(){
 
     marker=L.marker(dispPos(),{draggable:true}).addTo(map);
     updateEnabledUI();
+    setLocateBusy(false);
 
     map.on("baselayerchange",function(e){datum=e.layer.datum||"wgs"; var p=dispPos(); marker.setLatLng(p); map.setView(p,map.getZoom()); info();});
     map.on("click",function(e){movePin(e.latlng.lat,e.latlng.lng);});
@@ -212,6 +270,7 @@ function load(){
 
 $("btn").addEventListener("click",search);
 $("q").addEventListener("keydown",function(e){if(e.key==="Enter")search();});
+$("locatebtn").addEventListener("click",locateCurrent);
 $("savebtn").addEventListener("click",commit);
 $("restorebtn").addEventListener("click",toggleEnabled);
 load();
